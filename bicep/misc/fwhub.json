@@ -1,0 +1,58 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "azureFirewalls_cptdvnet_name": {
+            "defaultValue": "cptdvnet",
+            "type": "String"
+        },
+        "publicIPAddresses_cptdvnetfirewall_externalid": {
+            "defaultValue": "/subscriptions/4896a771-b1ab-4411-bd94-3c8467f1991e/resourceGroups/cptdvnet/providers/Microsoft.Network/publicIPAddresses/cptdvnetfirewall",
+            "type": "String"
+        },
+        "virtualNetworks_cptdvnethub_externalid": {
+            "defaultValue": "/subscriptions/4896a771-b1ab-4411-bd94-3c8467f1991e/resourceGroups/cptdvnet/providers/Microsoft.Network/virtualNetworks/cptdvnethub",
+            "type": "String"
+        },
+        "firewallPolicies_cptdvnet_externalid": {
+            "defaultValue": "/subscriptions/4896a771-b1ab-4411-bd94-3c8467f1991e/resourceGroups/cptdvnet/providers/Microsoft.Network/firewallPolicies/cptdvnet",
+            "type": "String"
+        }
+    },
+    "variables": {},
+    "resources": [
+        {
+            "type": "Microsoft.Network/azureFirewalls",
+            "apiVersion": "2020-11-01",
+            "name": "[parameters('azureFirewalls_cptdvnet_name')]",
+            "location": "eastus",
+            "properties": {
+                "sku": {
+                    "name": "AZFW_VNet",
+                    "tier": "Premium"
+                },
+                "threatIntelMode": "Alert",
+                "additionalProperties": {},
+                "ipConfigurations": [
+                    {
+                        "name": "[parameters('azureFirewalls_cptdvnet_name')]",
+                        "properties": {
+                            "publicIPAddress": {
+                                "id": "[parameters('publicIPAddresses_cptdvnetfirewall_externalid')]"
+                            },
+                            "subnet": {
+                                "id": "[concat(parameters('virtualNetworks_cptdvnethub_externalid'), '/subnets/AzureFirewallSubnet')]"
+                            }
+                        }
+                    }
+                ],
+                "networkRuleCollections": [],
+                "applicationRuleCollections": [],
+                "natRuleCollections": [],
+                "firewallPolicy": {
+                    "id": "[parameters('firewallPolicies_cptdvnet_externalid')]"
+                }
+            }
+        }
+    ]
+}

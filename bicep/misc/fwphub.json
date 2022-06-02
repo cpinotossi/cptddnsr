@@ -1,0 +1,90 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "firewallPolicies_cptdvnet_name": {
+            "defaultValue": "cptdvnet",
+            "type": "String"
+        }
+    },
+    "variables": {},
+    "resources": [
+        {
+            "type": "Microsoft.Network/firewallPolicies",
+            "apiVersion": "2020-11-01",
+            "name": "[parameters('firewallPolicies_cptdvnet_name')]",
+            "location": "eastus",
+            "properties": {
+                "sku": {
+                    "tier": "Premium"
+                },
+                "threatIntelMode": "Alert",
+                "intrusionDetection": {
+                    "mode": "Off"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Network/firewallPolicies/ruleCollectionGroups",
+            "apiVersion": "2020-11-01",
+            "name": "[concat(parameters('firewallPolicies_cptdvnet_name'), '/', parameters('firewallPolicies_cptdvnet_name'))]",
+            "location": "eastus",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/firewallPolicies', parameters('firewallPolicies_cptdvnet_name'))]"
+            ],
+            "properties": {
+                "priority": 2000,
+                "ruleCollections": [
+                    {
+                        "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+                        "action": {
+                            "type": "Allow"
+                        },
+                        "rules": [
+                            {
+                                "ruleType": "NetworkRule",
+                                "name": "spoke1",
+                                "ipProtocols": [
+                                    "ICMP"
+                                ],
+                                "sourceAddresses": [
+                                    "10.2.0.0/16"
+                                ],
+                                "sourceIpGroups": [],
+                                "destinationAddresses": [
+                                    "*"
+                                ],
+                                "destinationIpGroups": [],
+                                "destinationFqdns": [],
+                                "destinationPorts": [
+                                    "*"
+                                ]
+                            },
+                            {
+                                "ruleType": "NetworkRule",
+                                "name": "spoke2",
+                                "ipProtocols": [
+                                    "ICMP"
+                                ],
+                                "sourceAddresses": [
+                                    "192.168.0.0/16"
+                                ],
+                                "sourceIpGroups": [],
+                                "destinationAddresses": [
+                                    "*"
+                                ],
+                                "destinationIpGroups": [],
+                                "destinationFqdns": [],
+                                "destinationPorts": [
+                                    "*"
+                                ]
+                            }
+                        ],
+                        "name": "cptdvnet",
+                        "priority": 2000
+                    }
+                ]
+            }
+        }
+    ]
+}
