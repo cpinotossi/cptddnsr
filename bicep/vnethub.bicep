@@ -94,22 +94,5 @@ resource bastion 'Microsoft.Network/bastionHosts@2021-03-01' = {
   }
 }
 
-resource pdns 'Microsoft.Network/privateDnsZones@2020-06-01' = {
-  name: '${prefix}.org'
-  location: 'global'
-}
-
-resource pdnslink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
-  parent: pdns
-  name: prefix
-  location: 'global'
-  properties: {
-    registrationEnabled: false
-    virtualNetwork: {
-      id: vnet.id
-    }
-  }
-}
-
 @description('VNet Name')
 output vnetname string = vnet.name

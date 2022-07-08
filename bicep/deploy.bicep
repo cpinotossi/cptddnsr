@@ -30,8 +30,21 @@ module vnetspokemodule 'vnetspoke.bicep' = {
     cidervnet: '10.3.0.0/16'
     cidersubnet: '10.3.1.0/24'
   }
+  dependsOn:[
+    vnethubmodule
+  ]
 }
 
+module pdns 'pdns.bicep' = {
+  name: 'pdnsdeploy'
+  params: {
+    postfix: 'spoke'
+    prefix: prefix
+  }
+  dependsOn:[
+    vnetspokemodule
+  ]
+}
 
 module vmspokemodule 'vm.bicep' = {
   name: 'vmdeploy'
@@ -50,6 +63,7 @@ module vmspokemodule 'vm.bicep' = {
     vnetspokemodule
   ]
 }
+
 
 // module sab 'sab.bicep' = {
 //   name: 'sabdeploy'

@@ -37,22 +37,6 @@ resource vnet 'Microsoft.Network/virtualNetworks@2021-08-01' = {
   }
 }
 
-resource pdns 'Microsoft.Network/privateDnsZones@2020-06-01' existing = {
-  name: '${prefix}.org'
-}
-
-resource pdnslink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
-  parent: pdns
-  name: '${prefix}${postfix}'
-  location: 'global'
-  properties: {
-    registrationEnabled: true
-    virtualNetwork: {
-      id: vnet.id
-    }
-  }
-}
-
 resource peeringspoke2hub 'Microsoft.Network/virtualNetworks/virtualNetworkPeerings@2021-03-01' = {
   name: '${vnet.name}/spoke2hub'
   properties: {
