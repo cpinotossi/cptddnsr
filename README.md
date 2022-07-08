@@ -219,6 +219,6 @@ gh repo create $prefix --public
 git remote add origin https://github.com/cpinotossi/$prefix.git
 git status
 git add *
-git commit -m"add outbound demo"
+git commit -m"seperate pdns into own bicep module"
 git push origin main 
 ~~~
