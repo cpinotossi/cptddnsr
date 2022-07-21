@@ -173,7 +173,7 @@ From spoke1 peered to hub:
 
 ~~~ bash
 vmspoke1id=$(az vm show -g $prefix -n ${prefix}spoke1 --query id -o tsv)
-az network bastion ssh -n ${prefix}hub -g $prefix --target-resource-id $vmspoke1id --auth-type password --username chpinoto 
+az network bastion ssh -n ${prefix}hub -g $prefix --target-resource-id $vmspoke1id --auth-type password --username chpinoto
 demo!pass123
 ip addr show | grep eth0 # expect 10.3.0.4
 dig +noall +answer client-01-win-v.myedge.org. # expect 10.1.0.5
@@ -235,6 +235,6 @@ gh repo create $prefix --public
 git remote add origin https://github.com/cpinotossi/$prefix.git
 git status
 git add *
-git commit -m"seperate pdns into own bicep module"
+git commit -m"add disconnnected spoke demo"
 git push origin main 
 ~~~
