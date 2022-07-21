@@ -1,8 +1,0 @@
-{
-    "prefix":"cptdvnet",
-    "location":"eastus",
-    "myObjectId": "!!REPLACE!!",
-    "username":"chpinoto",
-    "password": "demo!pass123",
-    "networkwatchername": "NetworkWatcher_eastus"
-}

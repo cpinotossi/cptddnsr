@@ -2,11 +2,10 @@ targetScope = 'resourceGroup'
 
 param prefix string
 param postfix string
+param autoreg bool = false
 
-resource vnethub 'Microsoft.Network/virtualNetworks@2022-01-01' existing = {
-  name: prefix
-}
-resource vnetspoke 'Microsoft.Network/virtualNetworks@2022-01-01' existing = {
+
+resource vnet 'Microsoft.Network/virtualNetworks@2021-08-01' existing = {
   name: '${prefix}${postfix}'
 }
 
@@ -15,26 +14,14 @@ resource pdns 'Microsoft.Network/privateDnsZones@2020-06-01' = {
   location: 'global'
 }
 
-resource pdnshublink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
-  parent: pdns
-  name: prefix
-  location: 'global'
-  properties: {
-    registrationEnabled: false
-    virtualNetwork: {
-      id: vnethub.id
-    }
-  }
-}
-
-resource pdnsspokelink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+resource pdnslink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
   parent: pdns
   name: '${prefix}${postfix}'
   location: 'global'
   properties: {
-    registrationEnabled: true
+    registrationEnabled: autoreg
     virtualNetwork: {
-      id: vnetspoke.id
+      id: vnet.id
     }
   }
 }

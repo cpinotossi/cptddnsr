@@ -1,16 +1,13 @@
 targetScope = 'resourceGroup'
 
-param postfix string
 param prefix string
+param postfix string
 param location string
 param cidervnet string
 param cidersubnet string
 param ciderbastion string
-param ciderdnsrin string
-param ciderdnsrout string
 
-
-resource vnethub 'Microsoft.Network/virtualNetworks@2021-08-01' = {
+resource vnet 'Microsoft.Network/virtualNetworks@2021-08-01' = {
   name: '${prefix}${postfix}'
   location: location
   properties: {
@@ -36,38 +33,6 @@ resource vnethub 'Microsoft.Network/virtualNetworks@2021-08-01' = {
           delegations: []
           privateEndpointNetworkPolicies: 'Enabled'
           privateLinkServiceNetworkPolicies: 'Enabled'
-        }
-      }
-      {
-        name: 'dnsrin'
-        properties: {
-          addressPrefix: ciderdnsrin
-          delegations: [
-            {
-              name: 'Microsoft.Network.dnsResolvers'
-              properties:{
-                serviceName: 'Microsoft.Network/dnsResolvers'
-              }
-            }
-          ]
-          privateEndpointNetworkPolicies:'Disabled'
-          privateLinkServiceNetworkPolicies:'Enabled'
-        }
-      }
-      {
-        name: 'dnsrout'
-        properties: {
-          addressPrefix: ciderdnsrout
-          delegations: [
-            {
-              name: 'Microsoft.Network.dnsResolvers'
-              properties:{
-                serviceName: 'Microsoft.Network/dnsResolvers'
-              }
-            }
-          ]
-          privateEndpointNetworkPolicies:'Disabled'
-          privateLinkServiceNetworkPolicies:'Enabled'
         }
       }
     ]
@@ -108,7 +73,7 @@ resource bastion 'Microsoft.Network/bastionHosts@2021-03-01' = {
             id: pubipbastion.id
           }
           subnet: {
-            id: '${vnethub.id}/subnets/AzureBastionSubnet'
+            id: '${vnet.id}/subnets/AzureBastionSubnet'
           }
         }
       }
@@ -117,4 +82,7 @@ resource bastion 'Microsoft.Network/bastionHosts@2021-03-01' = {
 }
 
 @description('VNet Name')
-output vnetname string = vnethub.name
+output vnetname string = vnet.name
+
+
+

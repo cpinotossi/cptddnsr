@@ -7,39 +7,55 @@ Based on:
 - https://docs.microsoft.com/en-US/cli/azure/dns-resolver?view=azure-cli-latest
 
 The following sample demonstrates how to create a private DNS resolver inbound rule.
-![Overview](media/cptdpdnsr.001.png)
 
-The sample includes:
-- Azure Private DNS zone "cptddnsr.org" which use autoregistration 
-- a VM called "VM" which does get auto-registered by the private DNS zone "cptddnsr.org"
-- a VM called "ADDC" which runs Windows Server with DNS service enabled and conditional DNS configured to point to the private DNS resolver.
-- a VM called "WIN10" which will be used to send a DNS query which will be finally resolved by the private DNS zone via the private DNS resolver.
+~~~ mermaid
+classDiagram
+hub --> OnPrem : vpn
+hub --> spoke1 : peering
+hub : cidr 10.2.0.0/16
+hub : bastion
+hub : privat DNS Resolver
+pDNS --> hub : link/resolve
+pDNS --> spoke1 : link/autoreg
+pDNS --> spoke2 : link/autoreg
+pDNS: cptddnsr.org
+spoke2 : cidr 10.4.0.0/16
+spoke2 : bastion
+spoke2 : vm 10.4.0.4
+spoke1 : cidr 10.3.0.0/16
+spoke1 : vm 10.3.0.4
+OnPrem : cidr 10.1.0.0/16
+OnPrem : ADDC 10.1.0.4
+OnPrem : vm 10.1.0.5
+~~~
 
 The following sequence diagram does show how the DNS query does get resolved.
 
-- VM: VM which does get autoregistered via Azure private DNS (10.3.1.4)
-- ADDC: The VM which does run the DNS Service (10.1.0.4)
-- WIN10: The VM which acts as a client (10.1.0.5)
-- DNSRInbound: The Azure private DNS resolver inbound service (10.3.2.4)
-- AzPrivateDNSZone: The Azure private DNS zone which will be used to autoregister  (cptddnsr.org.)
+- spoke1VM: VM located at Spoke1. Autoregistered via Azure private DN (10.3.1.4)
+- ADDC: VM located onPrem which does run the DNS Service (10.1.0.4)
+- onPremVM: VM located onPrem which acts as a client (10.1.0.5)
+- pDNSr: The Azure private DNS resolver service (listen on 10.3.2.4:53)
+- pDNSz: The Azure private DNS zone (cptddnsr.org.)
 
 ~~~ mermaid
 sequenceDiagram
-    participant WIN10
+    participant onPremVM
     participant ADDC
-    participant DNSRInbound
-    participant AzPrivateDNSZone
-    WIN10->>ADDC: DNS query resolve cptddnsr.cptddnsr.org.
+    participant pDNSr
+    participant pDNSz
+    onPremVM->>ADDC: DNS query resolve cptddnsrspoke1.cptddnsr.org.
     Note right of ADDC: verify if conditional dns forward exists
-    ADDC-->>DNSRInbound: fwd DNS query for cptddnsr.cptddnsr.org.
-    DNSRInbound->>AzPrivateDNSZone: fwd DNS query for cptddnsr.cptddnsr.org.
-    Note right of AzPrivateDNSZone: resolve to IP 10.3.1.4
-    AzPrivateDNSZone->>DNSRInbound: fwd IP 10.3.1.4
-    DNSRInbound->>ADDC: fwd IP 10.3.1.4
-    ADDC->>WIN10: IP 10.3.1.4
+    ADDC-->>pDNSr: fwd DNS query for cptddnsrspoke1.cptddnsr.org.
+    pDNSr->>pDNSz: fwd DNS query for cptddnsrspoke1.cptddnsr.org.
+    Note right of pDNSz: resolve to IP 10.3.1.4
+    pDNSz->>pDNSr: fwd IP 10.3.1.4
+    pDNSr->>ADDC: fwd IP 10.3.1.4
+    ADDC->>onPremVM: IP 10.3.1.4
 ~~~
 
-The idea of the Azure private DNS resolver is to overcome the challenge with the none routable IP 168.63.129.16 which does provide DNS services inside a azure vNet. The issue is described [here](https://docs.microsoft.com/en-us/answers/questions/181776/azure-private-dns-zone-resolution-from-on-prem.html) in more details. To overcome the need to setup your own VMs which run a DNS Server (IaaS) Azure now offers a managed version (PaaS). Because our demo does not include a real on-prem enviroment we are going to mimic one by using two VNets which are connected via vnet peering with each other.
+The idea of the Azure private DNS resolver is to overcome the challenge with the none routable IP 168.63.129.16 which does provide DNS services inside a azure vNet. The issue is described [here](https://docs.microsoft.com/en-us/answers/questions/181776/azure-private-dns-zone-resolution-from-on-prem.html) in more details. 
+
+To overcome the need to setup your own VMs which run a DNS Server (IaaS) Azure now offers a managed version (PaaS). Because our demo does not include a real on-prem enviroment we are going to mimic one by just using an Azure VNets which is peering to the hub vnet.
 
 > IMPORTANT: The templates and commands provide here will only create parts of the enviroment.
 The grey area is not covered by the templates and commands of this repo.
@@ -50,7 +66,6 @@ In case you like to create the whole enviroment the following repo could be help
 - [Github repo to create a ADDC](https://github.com/Azure/azure-quickstart-templates/tree/master/application-workloads/active-directory/active-directory-new-domain-module-use)
 - [How to setup conditional forwarding on MS Server](https://www.interfacett.com/blogs/windows-server-how-to-configure-a-conditional-forwarder-in-dns/)
 
-
 Register the private DNS resolver at our Azure subscription
 
 > NOTE: At the time of writing, Azure private DNS resolver is still in preview. Therefore we need to verify if Azure privat DNS resolver is registered under your subscription.
@@ -60,7 +75,7 @@ az provider register --namespace Microsoft.Network # register the whole namespac
 az provider show --namespace Microsoft.Network -o table --query resourceTypes[].resourceType -o table | grep dnsResolvers # verify if dnsResolver has been installed
 ~~~
 
-Env. variables which will be used during this demo.
+Env. variables which will be used during this demo:
 
 ~~~ bash
 prefix=cptddnsr
@@ -69,131 +84,130 @@ myip=$(curl ifconfig.io) # Just in case we like to whitelist our own ip.
 myobjectid=$(az ad user list --query '[?displayName==`ga`].id' -o tsv) # just in case we like to assing some RBAC roles to ourself.
 ~~~
 
-Create foundation resources.
+Create foundation resources:
 
 ~~~ bash
 az group create -n $prefix -l $location
-az deployment group create -n $prefix -g $prefix --mode incremental --template-file bicep/deploy.bicep -p prefix=$prefix myobjectid=$myobjectid location=$location myip=$myip
-# Add existing infrastructe which does mimic onprem with AADC and windows and linux clients.
-rgop=file-rg
-vnetop=file-rg-vnet
-vnetlinuxid=$(az network vnet show -g $rgop -n $vnetop --query id -o tsv) # VNet id of onprem representation.
-az network vnet peering create -n hub2onprem --remote-vnet $vnetlinuxid -g $prefix --vnet-name $prefix --allow-forwarded-traffic --allow-vnet-access # peer with our hub vnet.
-vnetid=$(az network vnet show -g $prefix -n $prefix --query id -o tsv) # Retrieve vnet id.
-az network vnet peering create -n onprem2hub --remote-vnet $vnetid -g $rgop --vnet-name $vnetop  --allow-forwarded-traffic --allow-vnet-access # peer with our onprem vnet.
+az deployment group create -n $prefix -g $prefix --mode incremental --template-file bicep/deploy.bicep -p prefix=$prefix myobjectid=$myobjectid location=$location
 ~~~
 
-Create the private DNS resolver.
+Peer to existing infrastructe which does mimic onprem with ADDC and windows and linux clients:
 
 ~~~ bash
-subnetinid=$(az network vnet subnet show -g $prefix -n dnsrin --vnet-name $prefix --query id -o tsv) # Retrieve subnet in id.
-subnetoutid=$(az network vnet subnet show -g $prefix -n dnsrout --vnet-name $prefix --query id -o tsv) # Retrieve subnet out id.
-az dns-resolver create -n $prefix -g $prefix -l $location --id $vnetid # create private dns resolver inside vnet.
-az dns-resolver inbound-endpoint create --dns-resolver-name $prefix -n $prefix -g $prefix --ip-configuration private-ip-address="" private-ip-allocation-method=dynamic id=$subnetinid -l $location
-az dns-resolver outbound-endpoint create --dns-resolver-name $prefix -n $prefix -g $prefix -l $location --id $subnetoutid
-dnsinip=$(az dns-resolver inbound-endpoint show --dns-resolver-name $prefix -n $prefix -g $prefix --query ipConfigurations[].privateIpAddress -o tsv)
-dnsoutip=$(az dns-resolver outbound-endpoint show --dns-resolver-name $prefix -n $prefix -g $prefix --query ipConfigurations[].privateIpAddress -o tsv) 
+rgop=file-rg # name of the already existing resource group
+vnetop=file-rg-vnet # name of the already existing vnet
+# peer from hub to onprem
+vnetopid=$(az network vnet show -g $rgop -n $vnetop --query id -o tsv) 
+az network vnet peering create -n hub2onprem --remote-vnet $vnetopid -g $prefix --vnet-name ${prefix}hub --allow-forwarded-traffic --allow-vnet-access
+# peer from onprem to hub
+vnethubid=$(az network vnet show -g $prefix -n ${prefix}hub --query id -o tsv)
+az network vnet peering create -n onprem2hub --remote-vnet $vnethubid -g $rgop --vnet-name $vnetop  --allow-forwarded-traffic --allow-vnet-access 
+~~~
+
+Create the private DNS resolver:
+
+~~~ bash
+# Create dns resolver
+az dns-resolver create -n $prefix -g $prefix -l $location --id $vnethubid
+# Create dns resolver inbound
+dnsinsn=$(az network vnet subnet show -g $prefix -n dnsrin --vnet-name ${prefix}hub --query id -o tsv) # subnet id dns resolver in.
+az dns-resolver inbound-endpoint create --dns-resolver-name $prefix -n $prefix -g $prefix --ip-configuration private-ip-address="" private-ip-allocation-method=dynamic id=$dnsinsn -l $location
+# Create dns resolver outbound
+dnsoutsn=$(az network vnet subnet show -g $prefix -n dnsrout --vnet-name ${prefix}hub --query id -o tsv) # subnet id dns resolver out
+az dns-resolver outbound-endpoint create --dns-resolver-name $prefix -n $prefix -g $prefix -l $location --id $dnsoutsn
 dnsoutid=$(az dns-resolver outbound-endpoint show --dns-resolver-name $prefix -n $prefix -g $prefix --query id -o tsv) 
 az dns-resolver forwarding-ruleset create -n $prefix -l $location -g $prefix --outbound-endpoints id=$dnsoutid
 dcip=$(az network nic show --ids $(az vm show -g $rgop -n dc-01-win-vm --query networkProfile.networkInterfaces[0].id -o tsv) --query ipConfigurations[0].privateIpAddress -o tsv)
 az dns-resolver forwarding-rule create --forwarding-rule-name $prefix -g $prefix --ruleset-name $prefix --domain-name myedge.org. --forwarding-rule-state Enabled --target-dns-servers ip-address="${dcip}"
-vnetspokeid=$(az network vnet show -g $prefix -n ${prefix}spoke --query id -o tsv) # Retrieve vnet id.
-az dns-resolver vnet-link create -n $prefix -g $prefix --ruleset-name $prefix --id $vnetspokeid 
+# link dns resolver to spoke vnets
+vnetspoke1id=$(az network vnet show -g $prefix -n ${prefix}spoke1 --query id -o tsv) # Retrieve vnet id.
+az dns-resolver vnet-link create -n ${prefix}spoke1 -g $prefix --ruleset-name $prefix --id $vnetspoke1id # link dns resolver to spoke vnet
+vnetspoke2id=$(az network vnet show -g $prefix -n ${prefix}spoke2 --query id -o tsv) # Retrieve vnet id.
+az dns-resolver vnet-link create -n ${prefix}spoke2 -g $prefix --ruleset-name $prefix --id $vnetspoke2id # link dns resolver to spoke vnet
 ~~~
 
-As part of the foundation resources we created a private DNS zone.
-Let us get all A-Records for this zone.
+List all A-Records of zone "cptddnsr.org":
 
 ~~~ bash
-az network private-dns zone show -g $prefix -n ${prefix}.org
-az network private-dns record-set list -g $prefix -z ${prefix}.org --query '[?type==`Microsoft.Network/privateDnsZones/A`].{aRecords:aRecords,fqdn:fqdn}'
+az network private-dns record-set list -g $prefix -z ${prefix}.org --query '[?type==`Microsoft.Network/privateDnsZones/A`].{aRecords:aRecords[0].ipv4Address,fqdn:fqdn}' -o table
 ~~~
 
-Result
+Result:
 
 ~~~ json
-[
-  {
-    "aRecords": [
-      {
-        "ipv4Address": "10.3.1.4"
-      }
-    ],
-    "fqdn": "cptddnsr.cptddnsr.org."
-  }
-]
+ARecords    Fqdn
+----------  ----------------------------
+10.3.0.4    cptddnsrspoke1.cptddnsr.org.
+10.4.0.4    cptddnsrspoke2.cptddnsr.org.
+10.4.1.4    vm000000.cptddnsr.org.
+10.4.1.5    vm000001.cptddnsr.org.
 ~~~
+
+NOTE: vm000000, vm000001 belong to bastion.
 
 ### Test Inbound case
 
-Resolve the A-Record from two vm which are deployed under resource group "file-rg": 
-- a linux vm
- - Name: linux
-- a WIN10 vm (domain joined)
- - Name: client-01-win-vm
-Like mentioned at the beginning, some part of the resources are not covered by the templates of this repo.
-The WIN10 vm and the linux vm are such resources:
-
-![windows 10 client](media/cptdpdnsr.003.png)
+Send dns query from onprem VM
 
 ~~~ bash
-az network private-dns record-set list -g $prefix -z ${prefix}.org --query '[?type==`Microsoft.Network/privateDnsZones/A`].{fqdn:fqdn}' -o tsv # Print fqdn of our spoke vm. Will be cptddnsr.cptddnsr.org in our case.
 vmopid=$(az vm show -g $rgop -n linux --query id -o tsv)
-vmlinuxid=$(az vm show -g $rgop -n linux --query id -o tsv)
-az network bastion ssh -n ${prefix}bastion -g $prefix --target-resource-id $vmlinuxid --auth-type password --username chpinoto 
+az network bastion ssh -n ${prefix}hub -g $prefix --target-resource-id $vmopid --auth-type password --username chpinoto # log into onprem vm
+demo!pass123
 # use the fqdn of our spoke vm, autogenerated by our private dns zone.
-dig cptddnsr.cptddnsr.org.
+ip addr show | grep inet.*eth0
+dig +noall +answer cptddnsrspoke1.cptddnsr.org. # expect 10.3.0.4
+logout
 ~~~
 
-Outcome:
-~~~ text
-;; ANSWER SECTION:
-cptddnsr.cptddnsr.org.  9       IN      A       10.3.1.4
-~~~
-
-Same result can be achieved via windows client.
+Same result can be achieved via windows client:
 
 ~~~ powershell
 vmwinid=$(az vm show -g $rgop -n client-01-win-vm --query id -o tsv)
-az network bastion rdp -n ${prefix}bastion -g $prefix --target-resource-id $vmwinid
+az network bastion rdp -n ${prefix}hub -g $prefix --target-resource-id $vmwinid
+nslookup cptddnsrspoke1.cptddnsr.org
 ~~~
-
-Outcome:
-~~~ text
-nslookup cptddnsr.cptddnsr.org
-Server:  UnKnown
-Address:  10.1.0.4
-
-Non-authoritative answer:
-Name:    cptddnsr.cptddnsr.org
-Address:  10.3.1.4
-~~~
-
-- "Address:  10.3.1.4" IP of the VM called "VM".
-- "Address:  10.1.0.4" Ip of the VM ADDC which does provide DNS to WIN10 and is setup with conditional DNS forwarding.
 
 ### Test Outbound case
 
+From spoke1 peered to hub:
+
 ~~~ bash
-vmlinuxid=$(az vm show -g $rgop -n linux --query id -o tsv)
-az network bastion ssh -n ${prefix}bastion -g $prefix --target-resource-id $vmlinuxid --auth-type password --username chpinoto 
-dig client-01-win-v.myedge.org. #the last letter of vm has been cut of by addc
-dig dc-01-win-vm.myedge.org.
+vmspoke1id=$(az vm show -g $prefix -n ${prefix}spoke1 --query id -o tsv)
+az network bastion ssh -n ${prefix}hub -g $prefix --target-resource-id $vmspoke1id --auth-type password --username chpinoto 
+demo!pass123
+ip addr show | grep eth0 # expect 10.3.0.4
+dig +noall +answer client-01-win-v.myedge.org. # expect 10.1.0.5
+dig +noall +answer dc-01-win-vm.myedge.org. # exptect 10.1.0.4
+logout
 ~~~
 
-Outcome:
-~~~ text
-;; ANSWER SECTION:
-client-01-win-v.myedge.org. 1200 IN     A       10.1.0.5
+From spoke2 not peered to hub:
+
+~~~ bash
+vmspoke2id=$(az vm show -g $prefix -n ${prefix}spoke2 --query id -o tsv)
+az network bastion ssh -n ${prefix}spoke2 -g $prefix --target-resource-id $vmspoke2id --auth-type password --username chpinoto 
+demo!pass123
+ip addr show | grep eth0 # expect 10.4.0.4
+dig +noall +answer client-01-win-v.myedge.org. # expect 10.1.0.5
+dig +noall +answer dc-01-win-vm.myedge.org. # exptect 10.1.0.4
+logout
 ~~~
 
 ### Clean up
 
 ~~~ bash
+az network vnet peering delete -n hub2onprem -g $prefix --vnet-name ${prefix}hub
+az network vnet peering delete -n onprem2hub -g $rgop --vnet-name $vnetop
 az group delete -n $prefix -y
 ~~~
 
 # Misc
+
+## private DNS zone
+
+~~~ bash
+az network private-dns zone show -g $prefix -n ${prefix}.org
+~~~
 
 ## private DNS resolver tips and tricks
 
@@ -201,6 +215,8 @@ az group delete -n $prefix -y
 # Verify dns resolver state.
 az dns-resolver show -n $prefix -g $prefix --query dnsResolverState 
 nslookup dc-01-win-vm.myedge.org # look domain controller.
+dnsinip=$(az dns-resolver inbound-endpoint show --dns-resolver-name $prefix -n $prefix -g $prefix --query ipConfigurations[].privateIpAddress -o tsv) # get inbount ip
+az dns-resolver outbound-endpoint show --dns-resolver-name $prefix -n $prefix -g $prefix --query ipConfigurations[].privateIpAddress -o tsv  # get outbound details
 ~~~
 
 ## general usefull cli commands
