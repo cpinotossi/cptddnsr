@@ -14,11 +14,11 @@ module vnethubmodule 'vnethub.bicep' = {
     postfix: 'hub'
     prefix: prefix
     location: location
-    cidervnet: '10.2.0.0/16'
-    cidersubnet: '10.2.0.0/24'
-    ciderbastion: '10.2.1.0/24'
-    ciderdnsrin: '10.2.2.0/28'
-    ciderdnsrout: '10.2.2.16/28'
+    cidervnet: '10.5.0.0/16'
+    cidersubnet: '10.5.0.0/24'
+    ciderbastion: '10.5.1.0/24'
+    ciderdnsrin: '10.5.2.0/28'
+    ciderdnsrout: '10.5.2.16/28'
   }
 }
 
@@ -54,6 +54,7 @@ module pdnshub 'pdns.bicep' = {
     postfix: 'hub'
     prefix: prefix
     autoreg: false
+    fqdn: '${prefix}.org'
   }
   dependsOn:[
     vnetspoke1module
@@ -67,6 +68,7 @@ module pdnsspoke1 'pdns.bicep' = {
     postfix: 'spoke1'
     prefix: prefix
     autoreg: true
+    fqdn: '${prefix}.org'
   }
   dependsOn:[
     pdnshub
@@ -79,6 +81,7 @@ module pdnsspoke2 'pdns.bicep' = {
     postfix: 'spoke2'
     prefix: prefix
     autoreg: true
+    fqdn: '${prefix}.org'
   }
   dependsOn:[
     pdnsspoke1

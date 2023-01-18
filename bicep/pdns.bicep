@@ -3,6 +3,7 @@ targetScope = 'resourceGroup'
 param prefix string
 param postfix string
 param autoreg bool = false
+param fqdn string
 
 
 resource vnet 'Microsoft.Network/virtualNetworks@2021-08-01' existing = {
@@ -10,7 +11,7 @@ resource vnet 'Microsoft.Network/virtualNetworks@2021-08-01' existing = {
 }
 
 resource pdns 'Microsoft.Network/privateDnsZones@2020-06-01' = {
-  name: '${prefix}.org'
+  name: fqdn
   location: 'global'
 }
 

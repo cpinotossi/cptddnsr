@@ -12,7 +12,7 @@ The following sample demonstrates how to create a private DNS resolver inbound r
 classDiagram
 hub --> OnPrem : vpn
 hub --> spoke1 : peering
-hub : cidr 10.2.0.0/16
+hub : cidr 10.5.0.0/16
 hub : bastion
 hub : privat DNS Resolver
 pDNS --> hub : link/resolve
@@ -111,12 +111,12 @@ Create the private DNS resolver:
 az dns-resolver create -n $prefix -g $prefix -l $location --id $vnethubid
 # Create dns resolver inbound
 dnsinsn=$(az network vnet subnet show -g $prefix -n dnsrin --vnet-name ${prefix}hub --query id -o tsv) # subnet id dns resolver in.
-az dns-resolver inbound-endpoint create --dns-resolver-name $prefix -n $prefix -g $prefix --ip-configuration private-ip-address="" private-ip-allocation-method=dynamic id=$dnsinsn -l $location
+az dns-resolver inbound-endpoint create --dns-resolver-name $prefix -n $prefix -g $prefix --ip-configurations "[{private-ip-address:'',private-ip-allocation-method:dynamic,id:$dnsinsn}]" -l $location
 # Create dns resolver outbound
 dnsoutsn=$(az network vnet subnet show -g $prefix -n dnsrout --vnet-name ${prefix}hub --query id -o tsv) # subnet id dns resolver out
 az dns-resolver outbound-endpoint create --dns-resolver-name $prefix -n $prefix -g $prefix -l $location --id $dnsoutsn
 dnsoutid=$(az dns-resolver outbound-endpoint show --dns-resolver-name $prefix -n $prefix -g $prefix --query id -o tsv) 
-az dns-resolver forwarding-ruleset create -n $prefix -l $location -g $prefix --outbound-endpoints id=$dnsoutid
+az dns-resolver forwarding-ruleset create -n $prefix -l $location -g $prefix --outbound-endpoints "[{id:$dnsoutid}]"
 dcip=$(az network nic show --ids $(az vm show -g $rgop -n dc-01-win-vm --query networkProfile.networkInterfaces[0].id -o tsv) --query ipConfigurations[0].privateIpAddress -o tsv)
 az dns-resolver forwarding-rule create --forwarding-rule-name $prefix -g $prefix --ruleset-name $prefix --domain-name myedge.org. --forwarding-rule-state Enabled --target-dns-servers ip-address="${dcip}"
 # link dns resolver to spoke vnets
@@ -178,6 +178,11 @@ demo!pass123
 ip addr show | grep eth0 # expect 10.3.0.4
 dig +noall +answer client-01-win-v.myedge.org. # expect 10.1.0.5
 dig +noall +answer dc-01-win-vm.myedge.org. # exptect 10.1.0.4
+ping dc-01-win-vm.myedge.org
+# trigger ms defender dns
+dig 164e9408d12a701d91d206c6ab192994.info
+dig micros0ft.com
+dig all.mainnet.ethdisco.net
 logout
 ~~~
 
