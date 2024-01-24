@@ -12,18 +12,18 @@ The following sample demonstrates how to create a private DNS resolver inbound r
 classDiagram
 hub --> OnPrem : vpn
 hub --> spoke1 : peering
-hub : cidr 10.5.0.0/16
+hub : cidr 10.2.0.0/16
 hub : bastion
 hub : privat DNS Resolver
+rsDNS <-- pDNS : fwd resolve
+rsDNS --> hub : fwd resolve
+rsDNS : pDNS Ruleset
+rsDNS : myedge.org (10.1.0.4)
 pDNS --> hub : link/resolve
-pDNS --> spoke1 : link/autoreg
-pDNS --> spoke2 : link/autoreg
+pDNS <-- spoke1 : link/autoreg+resolve
 pDNS: cptddnsr.org
-spoke2 : cidr 10.4.0.0/16
-spoke2 : bastion
-spoke2 : vm 10.4.0.4
-spoke1 : cidr 10.3.0.0/16
-spoke1 : vm 10.3.0.4
+spoke1 : cidr 10.2.0.0/16
+spoke1 : vm 10.2.0.4
 OnPrem : cidr 10.1.0.0/16
 OnPrem : ADDC 10.1.0.4
 OnPrem : vm 10.1.0.5
@@ -78,26 +78,188 @@ az provider show --namespace Microsoft.Network -o table --query resourceTypes[].
 Env. variables which will be used during this demo:
 
 ~~~ bash
+sudo hwclock -s
+sudo ntpdate time.windows.com
 prefix=cptddnsr
 location=eastus
 myip=$(curl ifconfig.io) # Just in case we like to whitelist our own ip.
-myobjectid=$(az ad user list --query '[?displayName==`ga`].id' -o tsv) # just in case we like to assing some RBAC roles to ourself.
+myobjectid=$(az ad user list --query '[?displayName==`ga`].id' -o tsv) # just in case we like to assing some RBAC roles to yourself.
+oprgname=file-rg # name of the already existing resource group
+opvnetname=file-rg-vnet # name of the already existing vnet
+opvnetid=$(az network vnet show -g $oprgname -n $opvnetname --query id -o tsv) 
+opvnetcidr=$(az network vnet show -g $oprgname -n $opvnetname --query addressSpace.addressPrefixes[0] -o tsv)
+opvmdcname=dc-01-win-vm
+opnicdcname=dc-01-win-vm267
+opnicdcid=$(az vm show -g $oprgname -n $opvmdcname --query networkProfile.networkInterfaces[0].id -o tsv)
+opdnsip=$(az network nic show --ids $opnicdcid --query ipConfigurations[0].privateIpAddress -o tsv)
+opfqdn=myedge.org.
 ~~~
 
-Create foundation resources:
+### Create foundation resources:
 
 ~~~ bash
-az group create -n $prefix -l $location
-az deployment group create -n $prefix -g $prefix --mode incremental --template-file bicep/deploy.bicep -p prefix=$prefix myobjectid=$myobjectid location=$location
+# clean up
+az group delete -n $prefix -y
+az network vnet peering delete -g $oprgname -n ${opvnetname}${prefix}hub --vnet-name $opvnetname
+# create 
+az deployment sub create -n $prefix -l $location --template-file deploy.bicep -p prefix=$prefix location=$location myobjectid=$myobjectid myip=$myip oprgname=$oprgname opvnetname=$opvnetname opdnsip=$opdnsip opfqdn=$opfqdn
 ~~~
+
+### List all A-Records of zone "cptddnsr.org":
+
+~~~ bash
+az network private-dns record-set list -g $prefix -z ${prefix}.org --query '[?type==`Microsoft.Network/privateDnsZones/A`].{ARecords:aRecords[0].ipv4Address,fqdn:fqdn}' -o table
+~~~
+
+Result:
+
+~~~ text
+ARecords    Fqdn
+----------  ----------------------------
+10.2.0.4    cptddnsrhub.cptddnsr.org.
+10.3.0.4    cptddnsrspoke1.cptddnsr.org.
+10.2.1.4    vm000000.cptddnsr.org.
+10.2.1.5    vm000001.cptddnsr.org.
+~~~
+
+NOTE: vm000000, vm000001 belong to bastion.
+
+### List all VM IPs
+
+List all VM IPs from Hub and Spoke VNet:
+~~~bash
+az vm list-ip-addresses --ids $(az resource list -g $prefix --query "[?type=='Microsoft.Compute/virtualMachines'].id" -o tsv) --query "[].{Name:virtualMachine.name, RG:virtualMachine.resourceGroup, IP:virtualMachine.network.privateIpAddresses[0]}"
+~~~
+
+Result
+~~~json
+[
+  {
+    "IP": "10.2.0.4",
+    "Name": "cptddnsrhub",
+    "RG": "cptddnsr"
+  },
+  {
+    "IP": "10.3.0.4",
+    "Name": "cptddnsrspoke1",
+    "RG": "cptddnsr"
+  }
+]
+~~~
+
+List all VM IPs from Onprem VNet:
+~~~bash
+az vm list-ip-addresses --ids $(az resource list -g $oprgname --query "[?type=='Microsoft.Compute/virtualMachines'].id" -o tsv) --query "[].{Name:virtualMachine.name, RG:virtualMachine.resourceGroup, IP:virtualMachine.network.privateIpAddresses[0]}"
+~~~
+
+Result
+~~~json
+[
+  {
+    "IP": "10.1.0.4",
+    "Name": "dc-01-win-vm",
+    "RG": "file-rg"
+  },
+  {
+    "IP": "10.1.0.5",
+    "Name": "client-01-win-vm",
+    "RG": "FILE-RG"
+  },
+  {
+    "IP": "10.1.0.6",
+    "Name": "cptdazfilesync",
+    "RG": "file-rg"
+  }
+]
+~~~
+
+### Test Outbound from Hub VM
+
+~~~bash
+vmhubid=$(az vm show -g $prefix -n ${prefix}hub --query id -o tsv)
+az network bastion ssh -n ${prefix}hub -g $prefix --target-resource-id $vmhubid --auth-type AAD
+ping 10.3.0.4 # expect replay
+dig cptddnsrspoke1.cptddnsr.org # expect A record 10.3.0.4
+ip addr show | grep eth0 # expect 10.2.0.4
+dig +noall +answer client-01-win-v.myedge.org. # expect 10.1.0.5
+dig +noall +answer dc-01-win-vm.myedge.org. # exptect 10.1.0.4
+
+logout
+~~~
+
+### Test Inbound case
+
+~~~bash
+# Verify dns resolver state.
+az dns-resolver show -n $prefix -g $prefix --query dnsResolverState
+dnsinip=$(az dns-resolver inbound-endpoint show --dns-resolver-name $prefix -n dnsrin -g $prefix --query ipConfigurations[].privateIpAddress -o tsv) # get endpoint ip 
+echo $dnsinip # expect 10.2.2.4
+~~~
+Send dns query from onprem VM
+
+~~~ bash
+vmopid=$(az vm show -g $oprgname -n linux --query id -o tsv)
+az network bastion ssh -n ${prefix}hub -g $prefix --target-resource-id $vmopid --auth-type password --username chpinoto # log into onprem vm
+demo!pass123
+# use the fqdn of our spoke vm, autogenerated by our private dns zone.
+ip addr show | grep inet.*eth0
+dig +noall +answer cptddnsrspoke1.cptddnsr.org. # expect 10.3.0.4
+logout
+~~~
+
+Same result can be achieved via windows client:
+
+~~~ powershell
+vmwinid=$(az vm show -g $rgop -n client-01-win-vm --query id -o tsv)
+az network bastion rdp -n ${prefix}hub -g $prefix --target-resource-id $vmwinid
+nslookup cptddnsrspoke1.cptddnsr.org
+~~~
+
+### Test Outbound case
+
+From spoke1 peered to hub:
+
+~~~ bash
+vmspoke1id=$(az vm show -g $prefix -n ${prefix}spoke1 --query id -o tsv)
+az network bastion ssh -n ${prefix}hub -g $prefix --target-resource-id $vmspoke1id --auth-type password --username chpinoto # log into onprem vm
+demo!pass123
+ip addr show | grep eth0 # expect 10.3.0.4
+dig +noall +answer client-01-win-v.myedge.org. # expect 10.1.0.5
+dig +noall +answer dc-01-win-vm.myedge.org. # exptect 10.1.0.4
+ping dc-01-win-vm.myedge.org
+# trigger ms defender dns
+dig 164e9408d12a701d91d206c6ab192994.info
+dig micros0ft.com
+dig all.mainnet.ethdisco.net
+logout
+~~~
+
+From spoke2 not peered to hub:
+
+~~~ bash
+vmspoke2id=$(az vm show -g $prefix -n ${prefix}spoke2 --query id -o tsv)
+az network bastion ssh -n ${prefix}spoke2 -g $prefix --target-resource-id $vmspoke2id --auth-type password --username chpinoto 
+demo!pass123
+ip addr show | grep eth0 # expect 10.4.0.4
+dig +noall +answer client-01-win-v.myedge.org. # expect 10.1.0.5
+dig +noall +answer dc-01-win-vm.myedge.org. # exptect 10.1.0.4
+logout
+~~~
+
+### Service Tags
+
+~~~bash
+az network list-service-tags --location $location | jq 'values[]|select(.properties.systemService|startswith("AzureStorage"))'
+jq '.values[]|select(.properties.systemService|startswith("AzureStorage"))|select(.properties.region|startswith("westeurope"))' servicetags.json
+~~~
+
+
+## Implement private DNS resolver via Azure CLI
 
 Peer to existing infrastructe which does mimic onprem with ADDC and windows and linux clients:
 
 ~~~ bash
-rgop=file-rg # name of the already existing resource group
-vnetop=file-rg-vnet # name of the already existing vnet
 # peer from hub to onprem
-vnetopid=$(az network vnet show -g $rgop -n $vnetop --query id -o tsv) 
 az network vnet peering create -n hub2onprem --remote-vnet $vnetopid -g $prefix --vnet-name ${prefix}hub --allow-forwarded-traffic --allow-vnet-access
 # peer from onprem to hub
 vnethubid=$(az network vnet show -g $prefix -n ${prefix}hub --query id -o tsv)
@@ -126,85 +288,6 @@ vnetspoke2id=$(az network vnet show -g $prefix -n ${prefix}spoke2 --query id -o 
 az dns-resolver vnet-link create -n ${prefix}spoke2 -g $prefix --ruleset-name $prefix --id $vnetspoke2id # link dns resolver to spoke vnet
 ~~~
 
-List all A-Records of zone "cptddnsr.org":
-
-~~~ bash
-az network private-dns record-set list -g $prefix -z ${prefix}.org --query '[?type==`Microsoft.Network/privateDnsZones/A`].{aRecords:aRecords[0].ipv4Address,fqdn:fqdn}' -o table
-~~~
-
-Result:
-
-~~~ json
-ARecords    Fqdn
-----------  ----------------------------
-10.3.0.4    cptddnsrspoke1.cptddnsr.org.
-10.4.0.4    cptddnsrspoke2.cptddnsr.org.
-10.4.1.4    vm000000.cptddnsr.org.
-10.4.1.5    vm000001.cptddnsr.org.
-~~~
-
-NOTE: vm000000, vm000001 belong to bastion.
-
-### Test Inbound case
-
-Send dns query from onprem VM
-
-~~~ bash
-vmopid=$(az vm show -g $rgop -n linux --query id -o tsv)
-az network bastion ssh -n ${prefix}hub -g $prefix --target-resource-id $vmopid --auth-type password --username chpinoto # log into onprem vm
-demo!pass123
-# use the fqdn of our spoke vm, autogenerated by our private dns zone.
-ip addr show | grep inet.*eth0
-dig +noall +answer cptddnsrspoke1.cptddnsr.org. # expect 10.3.0.4
-logout
-~~~
-
-Same result can be achieved via windows client:
-
-~~~ powershell
-vmwinid=$(az vm show -g $rgop -n client-01-win-vm --query id -o tsv)
-az network bastion rdp -n ${prefix}hub -g $prefix --target-resource-id $vmwinid
-nslookup cptddnsrspoke1.cptddnsr.org
-~~~
-
-### Test Outbound case
-
-From spoke1 peered to hub:
-
-~~~ bash
-vmspoke1id=$(az vm show -g $prefix -n ${prefix}spoke1 --query id -o tsv)
-az network bastion ssh -n ${prefix}hub -g $prefix --target-resource-id $vmspoke1id --auth-type password --username chpinoto
-demo!pass123
-ip addr show | grep eth0 # expect 10.3.0.4
-dig +noall +answer client-01-win-v.myedge.org. # expect 10.1.0.5
-dig +noall +answer dc-01-win-vm.myedge.org. # exptect 10.1.0.4
-ping dc-01-win-vm.myedge.org
-# trigger ms defender dns
-dig 164e9408d12a701d91d206c6ab192994.info
-dig micros0ft.com
-dig all.mainnet.ethdisco.net
-logout
-~~~
-
-From spoke2 not peered to hub:
-
-~~~ bash
-vmspoke2id=$(az vm show -g $prefix -n ${prefix}spoke2 --query id -o tsv)
-az network bastion ssh -n ${prefix}spoke2 -g $prefix --target-resource-id $vmspoke2id --auth-type password --username chpinoto 
-demo!pass123
-ip addr show | grep eth0 # expect 10.4.0.4
-dig +noall +answer client-01-win-v.myedge.org. # expect 10.1.0.5
-dig +noall +answer dc-01-win-vm.myedge.org. # exptect 10.1.0.4
-logout
-~~~
-
-### Clean up
-
-~~~ bash
-az network vnet peering delete -n hub2onprem -g $prefix --vnet-name ${prefix}hub
-az network vnet peering delete -n onprem2hub -g $rgop --vnet-name $vnetop
-az group delete -n $prefix -y
-~~~
 
 # Misc
 
@@ -239,7 +322,28 @@ az network vnet peering delete -n hub-appproxy --vnet-name file-rg-vnet -g file-
 gh repo create $prefix --public
 git remote add origin https://github.com/cpinotossi/$prefix.git
 git status
+git add .gitignore
 git add *
 git commit -m"add disconnnected spoke demo"
 git push origin main 
+git remote add origin https://github.com/cpinotossi/$prefix.git
+git submodule add https://github.com/cpinotossi/azbicep
+git submodule init
+git submodule update
+~~~
+
+## WSL timing workaround
+~~~bash
+sudo hwclock -s
+sudo ntpdate time.windows.com
+~~~
+~~~pwsh
+Get-Date; wsl date
+~~~
+
+~~~bash
+# chmod does not work straight away at WSL.
+ls -la azbicep/ssh/chpinoto.key # should be -rwxrwxrwx
+sudo chmod 600 azbicep/ssh/chpinoto.key
+ls -la azbicep/ssh/chpinoto.key # should be -rw------- now
 ~~~

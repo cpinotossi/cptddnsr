@@ -1,0 +1,46 @@
+name: IaC (Infra as Code)
+
+# Controls when the workflow will run
+on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+  # push:
+  #  paths-ignore:
+  #  - 'README.md'
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # Job to set up Azure environment
+  setup-azure-env:
+    env:
+      RESOURCE_GROUP_NAME: cptdazvmss
+      SCALESET_NAME_PREFIX: cptdazvmss
+      SCALESET_DEFAULT_VMCOUNT: 2
+      SCALESET_MAX_VMCOUNT: 150
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v3
+
+      # Runs a single command using the runners shell
+      - name: Azure Login
+        uses: Azure/login@v1
+        with:
+          # Paste output of `az ad sp create-for-rbac` as value of secret variable: AZURE_CREDENTIALS
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy Bicep Template
+        uses: azure/arm-deploy@v1
+        with:
+          resourceGroupName: ${{ env.RESOURCE_GROUP_NAME }}
+          # Specify the path or URL to the Azure Resource Manager template.
+          template: deploy.bicep
+          deploymentName: github_${{ github.run_number }}
+          # Supply deployment parameter values.
+          parameters: scaleSetNamePrefix=${{ env.SCALESET_NAME_PREFIX }}
+            adminPassword=${{ secrets.VM_PASSWORD }}
+            scaleSetDefaultVMCount=${{ env.SCALESET_DEFAULT_VMCOUNT }}
+            scaleSetMaxVMCount=${{ env.SCALESET_MAX_VMCOUNT }}
