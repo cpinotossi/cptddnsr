@@ -78,16 +78,16 @@ az provider show --namespace Microsoft.Network -o table --query resourceTypes[].
 Env. variables which will be used during this demo:
 
 ~~~ bash
-sudo hwclock -s
-sudo ntpdate time.windows.com
+# sudo hwclock -s
+# sudo ntpdate time.windows.com
 prefix=cptddnsr
 location=eastus
 myip=$(curl ifconfig.io) # Just in case we like to whitelist our own ip.
-myobjectid=$(az ad user list --query '[?displayName==`ga`].id' -o tsv) # just in case we like to assing some RBAC roles to yourself.
+currentUserObjectId=$(az ad signed-in-user show --query id -o tsv)
 oprgname=file-rg # name of the already existing resource group
 opvnetname=file-rg-vnet # name of the already existing vnet
-opvnetid=$(az network vnet show -g $oprgname -n $opvnetname --query id -o tsv) 
-opvnetcidr=$(az network vnet show -g $oprgname -n $opvnetname --query addressSpace.addressPrefixes[0] -o tsv)
+onPremVnetId=$(az network vnet show -g $oprgname -n $opvnetname --query id -o tsv) 
+# opvnetcidr=$(az network vnet show -g $oprgname -n $opvnetname --query addressSpace.addressPrefixes[0] -o tsv)
 opvmdcname=dc-01-win-vm
 opnicdcname=dc-01-win-vm267
 opnicdcid=$(az vm show -g $oprgname -n $opvmdcname --query networkProfile.networkInterfaces[0].id -o tsv)
@@ -98,11 +98,11 @@ opfqdn=myedge.org.
 ### Create foundation resources:
 
 ~~~ bash
-# clean up
-az group delete -n $prefix -y
 az network vnet peering delete -g $oprgname -n ${opvnetname}${prefix}hub --vnet-name $opvnetname
 # create 
-az deployment sub create -n $prefix -l $location --template-file deploy.bicep -p prefix=$prefix location=$location myobjectid=$myobjectid myip=$myip oprgname=$oprgname opvnetname=$opvnetname opdnsip=$opdnsip opfqdn=$opfqdn
+# az deployment sub create -n $prefix -l $location --template-file deploy.bicep -p prefix=$prefix location=$location myobjectid=$myobjectid myip=$myip oprgname=$oprgname opvnetname=$opvnetname opdnsip=$opdnsip opfqdn=$opfqdn
+
+az deployment sub create -n $prefix -l $location --template-file main.bicep -p prefix=$prefix postfix=hub location=$location currentUserObjectId=$currentUserObjectId onPremVnetId=$onPremVnetId
 ~~~
 
 ### List all A-Records of zone "cptddnsr.org":
@@ -111,16 +111,12 @@ az deployment sub create -n $prefix -l $location --template-file deploy.bicep -p
 az network private-dns record-set list -g $prefix -z ${prefix}.org --query '[?type==`Microsoft.Network/privateDnsZones/A`].{ARecords:aRecords[0].ipv4Address,fqdn:fqdn}' -o table
 ~~~
 
-Result:
-
-~~~ text
 ARecords    Fqdn
-----------  ----------------------------
-10.2.0.4    cptddnsrhub.cptddnsr.org.
-10.3.0.4    cptddnsrspoke1.cptddnsr.org.
-10.2.1.4    vm000000.cptddnsr.org.
-10.2.1.5    vm000001.cptddnsr.org.
-~~~
+----------  ---------------------------
+10.0.0.4    cptddnsrhub.cptddnsr.org.
+10.2.0.4    cptddnsrspoke.cptddnsr.org.
+10.0.1.4    vm000000.cptddnsr.org.
+10.0.1.5    vm000001.cptddnsr.org.
 
 NOTE: vm000000, vm000001 belong to bastion.
 
@@ -128,62 +124,50 @@ NOTE: vm000000, vm000001 belong to bastion.
 
 List all VM IPs from Hub and Spoke VNet:
 ~~~bash
-az vm list-ip-addresses --ids $(az resource list -g $prefix --query "[?type=='Microsoft.Compute/virtualMachines'].id" -o tsv) --query "[].{Name:virtualMachine.name, RG:virtualMachine.resourceGroup, IP:virtualMachine.network.privateIpAddresses[0]}"
+az vm list-ip-addresses --ids $(az resource list -g $prefix --query "[?type=='Microsoft.Compute/virtualMachines'].id" -o tsv) --query "[].{Name:virtualMachine.name, RG:virtualMachine.resourceGroup, IP:virtualMachine.network.privateIpAddresses[0]}" -o table
 ~~~
 
-Result
-~~~json
-[
-  {
-    "IP": "10.2.0.4",
-    "Name": "cptddnsrhub",
-    "RG": "cptddnsr"
-  },
-  {
-    "IP": "10.3.0.4",
-    "Name": "cptddnsrspoke1",
-    "RG": "cptddnsr"
-  }
-]
-~~~
+Name           RG        IP
+-------------  --------  --------
+cptddnsrhub    cptddnsr  10.0.0.4
+cptddnsrspoke  cptddnsr  10.2.0.4
 
 List all VM IPs from Onprem VNet:
 ~~~bash
-az vm list-ip-addresses --ids $(az resource list -g $oprgname --query "[?type=='Microsoft.Compute/virtualMachines'].id" -o tsv) --query "[].{Name:virtualMachine.name, RG:virtualMachine.resourceGroup, IP:virtualMachine.network.privateIpAddresses[0]}"
+az vm list-ip-addresses --ids $(az resource list -g $oprgname --query "[?type=='Microsoft.Compute/virtualMachines'].id" -o tsv) --query "[].{Name:virtualMachine.name, RG:virtualMachine.resourceGroup, IP:virtualMachine.network.privateIpAddresses[0]}" -o table
 ~~~
 
-Result
-~~~json
-[
-  {
-    "IP": "10.1.0.4",
-    "Name": "dc-01-win-vm",
-    "RG": "file-rg"
-  },
-  {
-    "IP": "10.1.0.5",
-    "Name": "client-01-win-vm",
-    "RG": "FILE-RG"
-  },
-  {
-    "IP": "10.1.0.6",
-    "Name": "cptdazfilesync",
-    "RG": "file-rg"
-  }
-]
-~~~
+Name              RG       IP
+----------------  -------  --------
+cptdazfilesync    file-rg  10.1.0.6
+dc-01-win-vm      file-rg  10.1.0.4
+client-01-win-vm  file-rg  10.1.0.5
 
 ### Test Outbound from Hub VM
 
 ~~~bash
+dig client-01-win-v.myedge.org
+dig test.myedge.org
 vmhubid=$(az vm show -g $prefix -n ${prefix}hub --query id -o tsv)
-az network bastion ssh -n ${prefix}hub -g $prefix --target-resource-id $vmhubid --auth-type AAD
-ping 10.3.0.4 # expect replay
-dig cptddnsrspoke1.cptddnsr.org # expect A record 10.3.0.4
+az network bastion ssh -n $prefix -g $prefix --target-resource-id $vmhubid --auth-type AAD
+dig cptddnsrhub.cptddnsr.org # expect A record 10.0.0.4
+dig cptddnsrspoke.cptddnsr.org # expect A record 10.2.0.4
+ip addr show | grep eth0 # expect 10.0.0.4
+dig +noall +answer client-01-win-v.myedge.org. # expect 10.1.0.5
+dig +noall +answer dc-01-win-vm.myedge.org. # exptect 10.1.0.4
+logout
+~~~
+
+### Test Outbound from Spoke VM
+
+~~~bash
+vmspokeid=$(az vm show -g $prefix -n ${prefix}spoke --query id -o tsv)
+az network bastion ssh -n $prefix -g $prefix --target-resource-id $vmspokeid --auth-type AAD
+dig cptddnsrhub.cptddnsr.org # expect A record 10.0.0.4
+dig cptddnsrspoke.cptddnsr.org # expect A record 10.2.0.4
 ip addr show | grep eth0 # expect 10.2.0.4
 dig +noall +answer client-01-win-v.myedge.org. # expect 10.1.0.5
 dig +noall +answer dc-01-win-vm.myedge.org. # exptect 10.1.0.4
-
 logout
 ~~~
 
@@ -193,8 +177,9 @@ logout
 # Verify dns resolver state.
 az dns-resolver show -n $prefix -g $prefix --query dnsResolverState
 dnsinip=$(az dns-resolver inbound-endpoint show --dns-resolver-name $prefix -n dnsrin -g $prefix --query ipConfigurations[].privateIpAddress -o tsv) # get endpoint ip 
-echo $dnsinip # expect 10.2.2.4
+echo $dnsinip # expect 10.0.2.4
 ~~~
+
 Send dns query from onprem VM
 
 ~~~ bash
@@ -244,6 +229,18 @@ ip addr show | grep eth0 # expect 10.4.0.4
 dig +noall +answer client-01-win-v.myedge.org. # expect 10.1.0.5
 dig +noall +answer dc-01-win-vm.myedge.org. # exptect 10.1.0.4
 logout
+~~~
+
+### Clean Up
+
+~~~bash
+# clean up
+az group delete -n $prefix -y
+oprgname=file-rg # name of the already existing resource group
+opvmdcname=client-01-win-vm
+opnicdcname=dc-01-win-vm
+az vm deallocate -g $oprgname --name $opvmdcname --no-wait 
+az vm deallocate -g $oprgname --name $opnicdcname --no-wait 
 ~~~
 
 ### Service Tags

@@ -1,0 +1,11 @@
+{
+    "hubVnet": "10.0.0.0/16",
+    "hubSubnetDefault": "10.0.0.0/24",
+    "hubSubnetBastion": "10.0.1.0/24",
+    "hubVm": "10.0.0.4",
+    "hubDnsRIn": "10.0.2.0/28",
+    "hubDnsROut": "10.0.2.16/28",
+    "spokeVnet": "10.2.0.0/16",
+    "spokeSubnetDefault": "10.2.0.0/24",
+    "spokeVm": "10.2.0.4"
+  }

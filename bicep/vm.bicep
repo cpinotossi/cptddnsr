@@ -91,7 +91,7 @@ resource nic 'Microsoft.Network/networkInterfaces@2020-08-01' = {
           // privateIPAddress: '10.0.0.4'
           privateIPAllocationMethod: 'Static'
           subnet: {
-            id: '${vnet.id}/subnets/${prefix}'
+            id: '${vnet.id}/subnets/${prefix}${postfix}'
           }
           primary: true
           privateIPAddressVersion: 'IPv4'
